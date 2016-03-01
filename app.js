@@ -4,13 +4,14 @@ var fs = require('fs');
 var _ = require('lodash');
 var AWS = require('aws-sdk');
 var elasticsearch = require('elasticsearch');
-var jQuery = require('jquery-deferred');
 
 // load file names of S3 bucket
 var s3 = new AWS.S3({
     apiVersion: '2006-03-01',
     accessKeyId: config.awsAccessKeyId,
     secretAccessKey: config.awsSecretAccessKey
+    // used for Frankfurt S3 location
+    //, signatureVersion: 'v4'
 });
 
 s3.listObjects({Bucket: config.awsTargetBucket}, function (err, data) {
@@ -97,54 +98,67 @@ function iterateThroughSites() {
     }, 8000);
 }
 
-var deferredBigImage, deferredSmallImage;
+var promiseBigImage;
+
 function makeWebshotAndUpload(domain) {
     var imageName = domain + '.png';
     var imageNameSmall = domain + '-mobile.png';
     var timeout = 100 * 1000;
-    deferredBigImage = jQuery.Deferred();
-    deferredSmallImage = jQuery.Deferred();
 
-    console.log("Making webshot of " + imageName);
-    doWebshot(domain, imageName, {
-        timeout: timeout,
-        screenSize: {
-            width: 1024
-            , height: 768
-        }
-        , shotSize: {
-            width: 1024
-            , height: 768
-        }
-    });
-
-    deferredBigImage.done(function () {
-        console.log("Making webshot of " + imageNameSmall);
-
-        doWebshot(domain, imageNameSmall, {
+    promiseBigImage = new Promise(function (resolve, reject) {
+        console.log("Making webshot of " + imageName);
+        doWebshot(domain, imageName, resolve, {
             timeout: timeout,
             screenSize: {
-                width: 320
-                , height: 480
+                width: 1024
+                , height: 768
             }
             , shotSize: {
-                width: 320
-                , height: 480
+                width: 1024
+                , height: 768
             }
-            , userAgent: 'Mozilla/5.0 (iPhone; U; CPU iPhone OS 3_2 like Mac OS X; en-us)'
-            + ' AppleWebKit/531.21.20 (KHTML, like Gecko) Mobile/7B298g'
+        });
+    });
+
+    promiseBigImage.then(function () {
+        var promiseSmallImage = new Promise(function (resolve, reject) {
+            console.log("Making webshot of " + imageNameSmall);
+
+            doWebshot(domain, imageNameSmall, resolve, {
+                timeout: timeout,
+                screenSize: {
+                    width: 320
+                    , height: 480
+                }
+                , shotSize: {
+                    width: 320
+                    , height: 480
+                }
+                , userAgent: 'Mozilla/5.0 (iPhone; U; CPU iPhone OS 3_2 like Mac OS X; en-us)'
+                + ' AppleWebKit/531.21.20 (KHTML, like Gecko) Mobile/7B298g'
+            });
+
         });
 
-    });
-
-    deferredSmallImage.done(function () {
-        siteCounter++;
-        console.log('Iterating through site ' + siteCounter);
-        iterateThroughSites();
-    });
+        promiseSmallImage.then(function () {
+            siteCounter++;
+            console.log('Iterating through site ' + siteCounter);
+            iterateThroughSites();
+        }).catch(
+            // Log the rejection reason
+            function (reason) {
+                console.log('Handle rejected promise small image (' + reason + ') here.');
+            });
+        ;
+    }).catch(
+        // Log the rejection reason
+        function (reason) {
+            console.log('Handle rejected promise big image (' + reason + ') here.');
+        });
+    ;
 }
 
-function doWebshot(domain, imageName, options) {
+function doWebshot(domain, imageName, promiseResolve, options) {
     webshot(domain, imageName, options, function (err) {
         // this callback get called more times for one domain/imageName ... why?....
         if (finishedWebshotSites.indexOf(imageName) !== -1)
@@ -157,11 +171,7 @@ function doWebshot(domain, imageName, options) {
         else
             uploadToS3(imageName);
 
-        if (deferredBigImage.state() === 'resolved')
-            deferredSmallImage.resolve();
-        else
-            deferredBigImage.resolve();
-
+        promiseResolve();
     });
 }
 
