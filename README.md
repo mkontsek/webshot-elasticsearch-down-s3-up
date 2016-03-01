@@ -14,4 +14,3 @@ A simple NodeJS app that creates screenshots of websites stored in Elasticsearch
 ### Tips
 - Webshot is called one-at-a-time for sites since calling a large number of phantomjs instances can and will eat a lot of memory,
  resulting in, for example, exited Docker containers.   
-- Don't do it in NodeJS again, try Ratpack or something...
